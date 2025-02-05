@@ -205,6 +205,7 @@ SELECT_TEMPLATE = """
 
 @app.route("/")
 def index():
+    load_menu()
     return render_template_string(INDEX_TEMPLATE, title=MENU_TITLE, items=MENU_ITEMS)
 
 @app.route("/select/<key>")
