@@ -13,8 +13,7 @@ MENU_TITLE = ""
 MENU_ITEMS = []   # Список пунктов меню: dict с ключами 'key', 'label' и 'is_gap'
 LABELS = {}       # Словарь: имя метки -> список строк (блок команд)
 
-# Глобальный словарь переменных.
-# Здесь заданы значения по умолчанию, которые будут подставляться при встрече переменных в меню.
+# Глобальный словарь переменных со значениями по умолчанию.
 VARS = {
     "version": "1.7.5",
     "boot_mode": "EFI",
@@ -24,8 +23,12 @@ VARS = {
     "ip": "192.168.0.101"
 }
 
-COLORS = {}       # Словарь: индекс -> значение цвета (например, "6" -> "#ffffff")
-COLOR_PAIRS = {}  # Словарь: индекс пары -> словарь с ключами "foreground" и "background"
+# Словарь для хранения цветов (например, "6" -> "#ffffff")
+COLORS = {}
+# Словарь для хранения цветовых пар, которые могут использоваться для оформления (если понадобится)
+COLOR_PAIRS = {}
+# Отдельный словарь для хранения цветовых пар для выделения пунктов меню.
+HIGHLIGHT_PAIRS = {}
 
 def fetch_menu_file(url):
     """
@@ -40,16 +43,21 @@ def process_colors(lines):
     Обрабатывает команды задания цветов из строк меню.
     Ищет команды вида:
       - colour --rgb 0xffffff 6
-      - cpair --foreground 7 --background 2 2
+      - cpair --foreground 7 --background 1 2
     Обрабатываются только строки до первой метки (начинающейся с ":").
+    При обработке команды cpair цвета для выделения сохраняются в отдельном словаре HIGHLIGHT_PAIRS.
+    
+    В этой версии интерпретируем значение после --background так:
+      - Если оно равно "2", то фон считается зеленым (если в COLORS[2] не задан, то используется "#00ff00")
+      - Если оно равно "1", то фон считается красным (если в COLORS[1] не задан, то используется "#ff0000")
     """
-    global COLORS, COLOR_PAIRS
+    global COLORS, COLOR_PAIRS, HIGHLIGHT_PAIRS
     COLORS = {}
     COLOR_PAIRS = {}
+    HIGHLIGHT_PAIRS = {}
+    print("Начинаю обработку файла...")
     for line in lines:
-        # Если достигнута первая метка, прекращаем обработку цветов
-        if line.lstrip().startswith(":"):
-            break
+        # print(f"Обрабатываю строку: {line.strip()}") 
         line = line.strip()
         if line.startswith("colour"):
             # Пример: colour --rgb 0xffffff 6
@@ -59,15 +67,36 @@ def process_colors(lines):
                 index = m.group(2)
                 COLORS[index] = f"#{rgb}"
         elif line.startswith("cpair"):
-            # Пример: cpair --foreground 7 --background 2 2
-            m = re.search(r'--foreground\s+(\d+)\s+--background\s+(\d+)\s+(\d+)', line)
-            if m:
-                fg_index = m.group(1)
-                bg_index = m.group(2)
-                pair_index = m.group(3)
-                fg_color = COLORS.get(fg_index, "#ffffff")
-                bg_color = COLORS.get(bg_index, "#ff0000")  # по умолчанию красный для фона
-                COLOR_PAIRS[pair_index] = {"foreground": fg_color, "background": bg_color}
+          print(f"Обнаружена строка cpair: {line.strip()}")  # Отладочный вывод
+          m = re.search(r'--foreground\s+(\d+)\s+--background\s+(\d+)\s+(\d+)', line)
+          if m:
+              fg_index = m.group(1)
+              bg_index = m.group(2)
+              pair_index = m.group(3)
+              fg_color = COLORS.get(fg_index, "#ffffff")
+
+              # Интерпретация параметра bg_index:
+              if bg_index == "2":
+                  bg_color = COLORS.get(bg_index, "#00ff00")  # Зеленый
+              elif bg_index == "1":
+                  bg_color = COLORS.get(bg_index, "#ff0000")  # Красный
+              else:
+                  bg_color = COLORS.get(bg_index, "#ff0000")  # По умолчанию красный
+
+              # Вывод информации о цветах в консоль
+              print(f"Меню: {pair_index} | Цвет текста: {fg_color}, Цвет фона: {bg_color}")
+
+              # Сохраняем эту пару в словаре
+              HIGHLIGHT_PAIRS[pair_index] = {"foreground": fg_color, "background": bg_color}
+              COLOR_PAIRS[pair_index] = {"foreground": fg_color, "background": bg_color}
+              # Если достигнута первая метка, прекращаем обработку цветов
+              
+          else:
+              print("Ошибка: строка не соответствует шаблону")
+          if line.lstrip().startswith(":"):
+                    break
+
+
 
 def substitute_variables(text):
     """
@@ -114,14 +143,14 @@ def process_variables():
     Для каждой строки вида:
         set имя[:тип] значение
     выполняется подстановка уже известных переменных в значение.
-    Если переменная уже задана в VARS (значение по умолчанию), то она будет перезаписана.
+    Если переменная уже задана в VARS, то она будет перезаписана.
     """
     if "variables" not in LABELS:
         return
     for line in LABELS["variables"]:
         line = line.strip()
         if line.lower().startswith("set "):
-            # Пример: set space:hex 20:20 или set space ${space:string}
+            # Пример: set space:hex 20:20 или set version ${version:string}
             parts = line.split(maxsplit=2)
             if len(parts) < 3:
                 continue
@@ -182,10 +211,12 @@ def get_text_color():
 def get_item_highlight_colors():
     """
     Возвращает цветовую пару для выделения пунктов меню, заданную командой
-    'cpair --foreground 7 --background 2 2'.
+    'cpair --foreground ... --background ...' с нужным индексом.
+    Здесь используется словарь HIGHLIGHT_PAIRS.
     Если такой пары нет, используются цвета по умолчанию.
     """
-    pair = COLOR_PAIRS.get("2", {"foreground": "#ffffff", "background": "#ff0000"})
+    # Например, если выделение определяется парой с индексом "2"
+    pair = HIGHLIGHT_PAIRS.get("2", {"foreground": "#ffffff", "background": "#ff0000"})
     return pair["foreground"], pair["background"]
 
 def load_menu():
@@ -220,7 +251,7 @@ TEXT_COLOR = get_text_color()
 ITEM_FG, ITEM_BG = get_item_highlight_colors()
 
 # HTML-шаблон главной страницы (меню).
-# При наведении на пункт меню используется цветовая пара с индексом 2.
+# При наведении на пункт меню используется цветовая пара из HIGHLIGHT_PAIRS.
 INDEX_TEMPLATE = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -247,7 +278,7 @@ INDEX_TEMPLATE = f"""<!doctype html>
       color: {TEXT_COLOR};
       text-decoration: none;
     }}
-    /* При наведении на пункт меню используем выделение по цветовой паре "2" */
+    /* При наведении на пункт меню используем выделение согласно HIGHLIGHT_PAIRS */
     .item:has(a):hover {{
       background-color: {ITEM_BG};
       color: {ITEM_FG};
