@@ -1,5 +1,6 @@
 Эмулятор меню iPXE для тестирования.
-![изображение](https://github.com/user-attachments/assets/0e67b26c-7e8e-45f0-9d59-aaa4a939b35f)
+![изображение](https://github.com/user-attachments/assets/44f916e0-eaa4-47ac-8696-f65561f5fe16)
+
 
 - Как запустить?
 
