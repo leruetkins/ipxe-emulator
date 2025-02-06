@@ -8,11 +8,24 @@ app = Flask(__name__)
 # URL, с которого будет скачиваться файл меню iPXE.
 REMOTE_MENU_URL = "http://192.168.0.163:5000/menu"  # Замените на нужный URL
 
-# Глобальные переменные для хранения данных меню, меток и переменных
+# Глобальные переменные для хранения данных меню, меток, переменных и цветов
 MENU_TITLE = ""
 MENU_ITEMS = []   # Список пунктов меню: dict с ключами 'key', 'label' и 'is_gap'
 LABELS = {}       # Словарь: имя метки -> список строк (блок команд)
-VARS = {}         # Словарь переменных из блока :variables
+
+# Глобальный словарь переменных.
+# Здесь заданы значения по умолчанию, которые будут подставляться при встрече переменных в меню.
+VARS = {
+    "version": "1.7.5",
+    "boot_mode": "EFI",
+    "update": "true",
+    "update_version": "2.3.0",
+    "net0/mac": "FF:00:FF:00:FF",
+    "ip": "192.168.0.101"
+}
+
+COLORS = {}       # Словарь: индекс -> значение цвета (например, "6" -> "#ffffff")
+COLOR_PAIRS = {}  # Словарь: индекс пары -> словарь с ключами "foreground" и "background"
 
 def fetch_menu_file(url):
     """
@@ -21,6 +34,40 @@ def fetch_menu_file(url):
     response = requests.get(url)
     response.raise_for_status()
     return response.text.splitlines()
+
+def process_colors(lines):
+    """
+    Обрабатывает команды задания цветов из строк меню.
+    Ищет команды вида:
+      - colour --rgb 0xffffff 6
+      - cpair --foreground 7 --background 2 2
+    Обрабатываются только строки до первой метки (начинающейся с ":").
+    """
+    global COLORS, COLOR_PAIRS
+    COLORS = {}
+    COLOR_PAIRS = {}
+    for line in lines:
+        # Если достигнута первая метка, прекращаем обработку цветов
+        if line.lstrip().startswith(":"):
+            break
+        line = line.strip()
+        if line.startswith("colour"):
+            # Пример: colour --rgb 0xffffff 6
+            m = re.search(r'--rgb\s+([0-9a-fA-F]+)\s+(\d+)', line)
+            if m:
+                rgb = m.group(1)
+                index = m.group(2)
+                COLORS[index] = f"#{rgb}"
+        elif line.startswith("cpair"):
+            # Пример: cpair --foreground 7 --background 2 2
+            m = re.search(r'--foreground\s+(\d+)\s+--background\s+(\d+)\s+(\d+)', line)
+            if m:
+                fg_index = m.group(1)
+                bg_index = m.group(2)
+                pair_index = m.group(3)
+                fg_color = COLORS.get(fg_index, "#ffffff")
+                bg_color = COLORS.get(bg_index, "#ff0000")  # по умолчанию красный для фона
+                COLOR_PAIRS[pair_index] = {"foreground": fg_color, "background": bg_color}
 
 def substitute_variables(text):
     """
@@ -49,29 +96,25 @@ def parse_labels(lines):
         line = line.rstrip()
         if not line:
             continue
-
-        # Если строка начинается с ":" — это новая метка
         if line.startswith(":"):
-            # Сохраняем предыдущий блок, если он есть
             if current_label is not None:
                 labels[current_label] = block
-            # Получаем имя метки (без двоеточия)
             parts = line.split()
-            current_label = parts[0][1:]
+            current_label = parts[0][1:]  # Убираем двоеточие
             block = [line]
         else:
             block.append(line)
-    # Сохраняем последний блок
     if current_label is not None:
         labels[current_label] = block
     return labels
 
 def process_variables():
     """
-    Обрабатывает блок переменных (метка :variables) и заполняет словарь VARS.
+    Обрабатывает блок переменных (метка :variables) и обновляет словарь VARS.
     Для каждой строки вида:
         set имя[:тип] значение
     выполняется подстановка уже известных переменных в значение.
+    Если переменная уже задана в VARS (значение по умолчанию), то она будет перезаписана.
     """
     if "variables" not in LABELS:
         return
@@ -85,13 +128,15 @@ def process_variables():
             var_full = parts[1]
             var_name = var_full.split(":")[0]
             value = parts[2]
-            # Подставляем уже известные переменные (если есть)
             value = substitute_variables(value)
             if value == "20:20":
                 value = "    "  # Заменяем 20:20 на 4 пробела
             VARS[var_name] = value
 
 def parse_menu_label(block_lines):
+    """
+    Парсит блок с меткой 'menu' для формирования заголовка меню и пунктов.
+    """
     global MENU_TITLE, MENU_ITEMS
     MENU_TITLE = ""
     MENU_ITEMS = []
@@ -102,7 +147,6 @@ def parse_menu_label(block_lines):
         line = line.rstrip()
         if not line:
             continue
-            
         if line.lstrip().lower().startswith("menu "):
             m = re_menu.match(line)
             if m:
@@ -117,11 +161,9 @@ def parse_menu_label(block_lines):
                 else:
                     key = m.group(4)
                     label = m.group(5)
-
                 label = substitute_variables(label)
                 if is_gap and not label.strip():
                     continue
-
                 MENU_ITEMS.append({
                     'key': key,
                     'label': label,
@@ -130,17 +172,35 @@ def parse_menu_label(block_lines):
         elif line.lstrip().lower().startswith("choose"):
             break
 
+def get_text_color():
+    """
+    Возвращает цвет, заданный командой `colour --rgb ...` с индексом 6,
+    который используется как основной цвет всего текста.
+    """
+    return COLORS.get("6", "#ffffff")
+
+def get_item_highlight_colors():
+    """
+    Возвращает цветовую пару для выделения пунктов меню, заданную командой
+    'cpair --foreground 7 --background 2 2'.
+    Если такой пары нет, используются цвета по умолчанию.
+    """
+    pair = COLOR_PAIRS.get("2", {"foreground": "#ffffff", "background": "#ff0000"})
+    return pair["foreground"], pair["background"]
 
 def load_menu():
     """
-    Загружает меню iPXE с удалённого URL, разбивает его на блоки по меткам,
+    Загружает меню iPXE с удалённого URL, обрабатывает цвета, разбивает его на блоки по меткам,
     обрабатывает переменные и парсит блок с меткой 'menu' для формирования меню.
     """
     global LABELS
     try:
         lines = fetch_menu_file(REMOTE_MENU_URL)
+        # Обработка цветовых команд до первой метки
+        process_colors(lines)
+        # Разбиваем на блоки по меткам
         LABELS = parse_labels(lines)
-        # Сначала обработаем переменные, если есть блок :variables
+        # Обрабатываем переменные (файл может задавать свои переменные, перезаписывая значения по умолчанию)
         process_variables()
         # Если есть блок с меткой 'menu', парсим его как основное меню
         if "menu" in LABELS:
@@ -154,50 +214,98 @@ def load_menu():
 # Загружаем меню при старте приложения
 load_menu()
 
-# HTML-шаблон главной страницы (меню)
-INDEX_TEMPLATE = """<!doctype html>
+# Получаем основной цвет текста
+TEXT_COLOR = get_text_color()
+# Получаем цвета для выделения пунктов меню (например, при наведении)
+ITEM_FG, ITEM_BG = get_item_highlight_colors()
+
+# HTML-шаблон главной страницы (меню).
+# При наведении на пункт меню используется цветовая пара с индексом 2.
+INDEX_TEMPLATE = f"""<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>{{ title }}</title>
+  <title>{{{{ title }}}}</title>
   <style>
-    body { font-family: monospace; background-color: #000; color: #0f0; padding: 20px; }
-    h3 { text-align: center; }
-    .menu { margin-top: 20px; }
-    .item { margin: 5px 0; white-space: pre; }
-    a { color: #0f0; text-decoration: none; }
-    .item:has(a):hover { background-color: #0f0; color: #fff; }
-    .item:has(a):hover a { color: #fff; }
-    .gap { color: #888; }
+    body {{
+      font-family: monospace;
+      background-color: #000;
+      color: {TEXT_COLOR};
+      padding: 20px;
+    }}
+    h3 {{
+      text-align: center;
+    }}
+    .menu {{
+      margin-top: 20px;
+    }}
+    .item {{
+      margin: 5px 0;
+      white-space: pre;
+    }}
+    a {{
+      color: {TEXT_COLOR};
+      text-decoration: none;
+    }}
+    /* При наведении на пункт меню используем выделение по цветовой паре "2" */
+    .item:has(a):hover {{
+      background-color: {ITEM_BG};
+      color: {ITEM_FG};
+    }}
+    .item:has(a):hover a {{
+      color: {ITEM_FG};
+    }}
+    .gap {{
+      color: #888;
+    }}
   </style>
 </head>
 <body>
-  <h3>{{ title }}</h3>
-  <div class="menu">{% for item in items %}{% if item.is_gap %}<div class="item gap">{{ item.label }}</div>{% elif item.key %}<div class="item"><a href="/select/{{ item.key }}">{{ item.label }}</a></div>{% endif %}{% endfor %}</div>
+  <h3>{{{{ title }}}}</h3>
+  <div class="menu">
+    {{% for item in items %}}
+      {{% if item.is_gap %}}
+        <div class="item gap">{{{{ item.label }}}}</div>
+      {{% elif item.key %}}
+        <div class="item"><a href="/select/{{{{ item.key }}}}">{{{{ item.label }}}}</a></div>
+      {{% endif %}}
+    {{% endfor %}}
+  </div>
 </body>
-</html>"""
+</html>
+"""
 
-
-# HTML-шаблон для отображения выбранной опции (блок метки)
-SELECT_TEMPLATE = """
+# HTML-шаблон для отображения выбранной опции (блок метки).
+SELECT_TEMPLATE = f"""
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Выбран: {{ key }}</title>
+  <title>Выбран: {{{{ key }}}}</title>
   <style>
-    body { font-family: monospace; background-color: #000; color: #0f0; padding: 20px; }
-    pre { background-color: #111; padding: 10px; }
-    a { color: #0f0; text-decoration: none; }
+    body {{
+      font-family: monospace;
+      background-color: #000;
+      color: {TEXT_COLOR};
+      padding: 20px;
+    }}
+    pre {{
+      background-color: #111;
+      padding: 10px;
+    }}
+    a {{
+      color: {TEXT_COLOR};
+      text-decoration: none;
+    }}
   </style>
 </head>
 <body>
-  <h1>Опция: {{ key }} - {{ label }}</h1>
-  {% if block %}
-    <pre>{{ block }}</pre>
-  {% else %}
+  <h1>Опция: {{{{ key }}}} - {{{{ label }}}}</h1>
+  {{% if block %}}
+    <pre>{{{{ block }}}}</pre>
+  {{% else %}}
     <p>Нет данных для выбранного пункта.</p>
-  {% endif %}
+  {{% endif %}}
   <p><a href="/">Вернуться в меню</a></p>
 </body>
 </html>
@@ -205,8 +313,63 @@ SELECT_TEMPLATE = """
 
 @app.route("/")
 def index():
+    # Перезагружаем меню
     load_menu()
-    return render_template_string(INDEX_TEMPLATE, title=MENU_TITLE, items=MENU_ITEMS)
+    text_color = get_text_color()
+    item_fg, item_bg = get_item_highlight_colors()
+    template = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{{{ title }}}}</title>
+  <style>
+    body {{
+      font-family: monospace;
+      background-color: #000;
+      color: {text_color};
+      padding: 20px;
+    }}
+    h3 {{
+      text-align: center;
+    }}
+    .menu {{
+      margin-top: 20px;
+    }}
+    .item {{
+      margin: 5px 0;
+      white-space: pre;
+    }}
+    a {{
+      color: {text_color};
+      text-decoration: none;
+    }}
+    .item:has(a):hover {{
+      background-color: {item_bg};
+      color: {item_fg};
+    }}
+    .item:has(a):hover a {{
+      color: {item_fg};
+    }}
+    .gap {{
+      color: #888;
+    }}
+  </style>
+</head>
+<body>
+  <h3>{{{{ title }}}}</h3>
+  <div class="menu">
+    {{% for item in items %}}
+      {{% if item.is_gap %}}
+        <div class="item gap">{{{{ item.label }}}}</div>
+      {{% elif item.key %}}
+        <div class="item"><a href="/select/{{{{ item.key }}}}">{{{{ item.label }}}}</a></div>
+      {{% endif %}}
+    {{% endfor %}}
+  </div>
+</body>
+</html>
+"""
+    return render_template_string(template, title=MENU_TITLE, items=MENU_ITEMS)
 
 @app.route("/select/<key>")
 def select(key):
@@ -214,15 +377,48 @@ def select(key):
     item = next((item for item in MENU_ITEMS if item['key'] == key and not item['is_gap']), None)
     if not item:
         abort(404)
-
     # Если для выбранного ключа есть блок с меткой, получаем его содержимое
     block_lines = LABELS.get(key)
     if block_lines:
         block_text = "\n".join(substitute_variables(line) for line in block_lines)
     else:
         block_text = ""
-
-    return render_template_string(SELECT_TEMPLATE, key=key, label=item['label'], block=block_text)
+    text_color = get_text_color()
+    template = f"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Выбран: {{{{ key }}}}</title>
+  <style>
+    body {{
+      font-family: monospace;
+      background-color: #000;
+      color: {text_color};
+      padding: 20px;
+    }}
+    pre {{
+      background-color: #111;
+      padding: 10px;
+    }}
+    a {{
+      color: {text_color};
+      text-decoration: none;
+    }}
+  </style>
+</head>
+<body>
+  <h1>Опция: {{{{ key }}}} - {{{{ label }}}}</h1>
+  {{% if block %}}
+    <pre>{{{{ block }}}}</pre>
+  {{% else %}}
+    <p>Нет данных для выбранного пункта.</p>
+  {{% endif %}}
+  <p><a href="/">Вернуться в меню</a></p>
+</body>
+</html>
+"""
+    return render_template_string(template, key=key, label=item['label'], block=block_text)
 
 if __name__ == "__main__":
     # Запускаем Flask-сервер
