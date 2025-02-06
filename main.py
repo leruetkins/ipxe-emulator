@@ -186,7 +186,7 @@ def parse_menu_label(block_lines):
             m = re_iseq.match(line)
             if m:
                 var_name = m.group(1)  # Например, ${platform}
-                expected_value = m.group(2)  # Например, pcbios
+                expected_value = m.group(2)  # Например, efi
                 item_line = m.group(3)  # Команда item
                 alternative_action = m.group(4)  # Альтернативная команда после ||
 
@@ -194,6 +194,9 @@ def parse_menu_label(block_lines):
                 actual_value = substitute_variables(var_name)
                 if actual_value == expected_value:
                     line = item_line  # Выполняем item
+                    # Убираем " ||" и все, что после него
+                    if " ||" in line:
+                        line = line.split(" ||")[0]  # Оставляем только то, что до " ||"
                 else:
                     continue  # Игнорируем строку, альтернативное действие не выполняется
 
@@ -217,6 +220,8 @@ def parse_menu_label(block_lines):
                 })
         elif line.lstrip().lower().startswith("choose"):
             break
+
+
 
 
 def get_text_color():
