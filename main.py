@@ -433,6 +433,7 @@ def index():
 
 @app.route("/select/<key>")
 def select(key):
+    item_fg, item_bg = get_item_highlight_colors()
     # Находим пункт меню по ключу (если ключ не пустой)
     item = next((item for item in MENU_ITEMS if item['key'] == key and not item['is_gap']), None)
     if not item:
@@ -465,6 +466,18 @@ def select(key):
       color: {text_color};
       text-decoration: none;
     }}
+    .item {{
+      margin: 5px 0;
+      padding: 1px 10px;
+      white-space: pre;
+    }}
+    .item:has(a):hover {{
+      background-color: {item_bg};
+      color: {item_fg};
+    }}
+    .item:has(a):hover a {{
+      color: {item_fg};
+    }}
   </style>
 </head>
 <body>
@@ -474,7 +487,7 @@ def select(key):
   {{% else %}}
     <p>Нет данных для выбранного пункта.</p>
   {{% endif %}}
-  <p><a href="/">Вернуться в меню</a></p>
+  <div class="item"><a href="/"><- Вернуться в меню</a></div>
 </body>
 </html>
 """
