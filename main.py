@@ -138,17 +138,15 @@ def parse_labels(lines):
         labels[current_label] = block
     return labels
 
-def process_variables():
+def process_variables(lines):
     """
-    Обрабатывает блок переменных (метка :variables) и обновляет словарь VARS.
     Для каждой строки вида:
         set имя[:тип] значение
     выполняется подстановка уже известных переменных в значение.
     Если переменная уже задана в VARS, то она будет перезаписана.
     """
-    if "variables" not in LABELS:
-        return
-    for line in LABELS["variables"]:
+    
+    for line in lines:
         line = line.strip()
         if line.lower().startswith("set "):
             # Пример: set space:hex 20:20 или set version ${version:string}
@@ -156,12 +154,20 @@ def process_variables():
             if len(parts) < 3:
                 continue
             var_full = parts[1]
-            var_name = var_full.split(":")[0]
+            var_name = var_full.split(":")[0]  # Имя переменной без типа
             value = parts[2]
-            value = substitute_variables(value)
+            value = substitute_variables(value)  # Подстановка переменных в значение
             if value == "20:20":
                 value = "    "  # Заменяем 20:20 на 4 пробела
-            VARS[var_name] = value
+            VARS[var_name] = value  # Обновляем переменную в словаре
+
+    # Выводим список всех переменных после обработки
+    print("Список переменных:")
+    for var_name, var_value in VARS.items():
+        print(f"{var_name}: {var_value}")
+
+
+
 
 def parse_menu_label(block_lines):
     """
@@ -255,7 +261,7 @@ def load_menu():
         # Разбиваем на блоки по меткам
         LABELS = parse_labels(lines)
         # Обрабатываем переменные (файл может задавать свои переменные, перезаписывая значения по умолчанию)
-        process_variables()
+        process_variables(lines)
         # Если есть блок с меткой 'menu', парсим его как основное меню
         if "menu" in LABELS:
             parse_menu_label(LABELS["menu"])
