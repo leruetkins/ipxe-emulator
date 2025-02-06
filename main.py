@@ -20,7 +20,8 @@ VARS = {
     "update": "true",
     "update_version": "2.3.0",
     "net0/mac": "FF:00:FF:00:FF",
-    "ip": "192.168.0.101"
+    "ip": "192.168.0.101",
+    "platform": "pcbios"
 }
 
 # Словарь для хранения цветов (например, "6" -> "#ffffff")
@@ -171,6 +172,7 @@ def parse_menu_label(block_lines):
     MENU_ITEMS = []
     re_menu = re.compile(r'^\s*menu\s+(.*)', re.IGNORECASE)
     re_item = re.compile(r'^\s*item\s+(?:(--gap)\s*(.*)|((\S+)\s+(.*)))', re.IGNORECASE)
+    re_iseq = re.compile(r'^\s*iseq\s+(\$\{\w+\})\s+(\S+)\s*&&\s*(item\s+.*)(?:\s*\|\|\s*(.*))?', re.IGNORECASE)
 
     for line in block_lines:
         line = line.rstrip()
@@ -180,7 +182,22 @@ def parse_menu_label(block_lines):
             m = re_menu.match(line)
             if m:
                 MENU_TITLE = substitute_variables(m.group(1))
-        elif line.lstrip().lower().startswith("item"):
+        elif line.lstrip().lower().startswith("iseq"):
+            m = re_iseq.match(line)
+            if m:
+                var_name = m.group(1)  # Например, ${platform}
+                expected_value = m.group(2)  # Например, pcbios
+                item_line = m.group(3)  # Команда item
+                alternative_action = m.group(4)  # Альтернативная команда после ||
+
+                # Подставляем значение переменной
+                actual_value = substitute_variables(var_name)
+                if actual_value == expected_value:
+                    line = item_line  # Выполняем item
+                else:
+                    continue  # Игнорируем строку, альтернативное действие не выполняется
+
+        if line.lstrip().lower().startswith("item"):
             m = re_item.match(line)
             if m:
                 is_gap = bool(m.group(1))
@@ -200,6 +217,7 @@ def parse_menu_label(block_lines):
                 })
         elif line.lstrip().lower().startswith("choose"):
             break
+
 
 def get_text_color():
     """
