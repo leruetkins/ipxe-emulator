@@ -396,12 +396,19 @@ def index():
       margin-top: 20px;
     }}
     .item {{
-      margin: 5px 0;
+      margin: 2px 0;
+      padding: 0px 0;
       white-space: pre;
+      display: block;
+      text-decoration: none;
     }}
     a {{
+      display: block;
       color: {text_color};
       text-decoration: none;
+      width: 100%;
+      height: 100%;
+      padding: 2px;
     }}
     .item:has(a):hover {{
       background-color: {item_bg};
@@ -428,6 +435,7 @@ def index():
   </div>
 </body>
 </html>
+
 """
     return render_template_string(template, title=MENU_TITLE, items=MENU_ITEMS)
 
@@ -465,11 +473,15 @@ def select(key):
     a {{
       color: {text_color};
       text-decoration: none;
+      display: block;
+      width: 100%;
+      height: 100%;
     }}
     .item {{
       margin: 5px 0;
-      padding: 1px 10px;
+      padding: 2px 10px;
       white-space: pre;
+      display: block;
     }}
     .item:has(a):hover {{
       background-color: {item_bg};
@@ -490,6 +502,7 @@ def select(key):
   <div class="item"><a href="/"><- Вернуться в меню</a></div>
 </body>
 </html>
+
 """
     return render_template_string(template, key=key, label=item['label'], block=block_text)
 
